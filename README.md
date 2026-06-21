@@ -1,3 +1,5 @@
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
+
 # Smart Image Saver (Chromium, MV3)
 
 Right-click an image on X/Twitter or Bluesky → **Save Image w Custom Filename**.
@@ -76,3 +78,4 @@ background.js          submenu, format sniffing, conversion, save
 extractors.js  per-site DOM extractors (patch here)
 content.js     tracks the right-clicked image, builds the filename base
 ```
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
