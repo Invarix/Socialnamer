@@ -1,0 +1,481 @@
+/* =============================================================================
+ * extractors.js  —  content-script world
+ *
+ * One extractor per site family. Given the right-clicked <img>, returns the
+ * pieces of a filename: poster name, @handle, artist shout-outs, hashtags, plus
+ * a fallback (the site's random string) and the file extension to keep.
+ *
+ * The DOM selectors are the fragile part — X and Bluesky ship obfuscated,
+ * shifting markup, so we lean on data-testid / href shapes and fail soft
+ * (omit a field rather than throw). This file is where you patch when a site
+ * reshuffles its layout. Add a site by inserting an extractor before GENERIC.
+ * ========================================================================== */
+
+(function () {
+  "use strict";
+
+  const MENTION_RE = /@([A-Za-z0-9_]{1,30})/g;
+  const HASHTAG_RE = /#([\p{L}\p{N}_]{1,40})/gu;
+  const CREDIT_HINT_RE =
+    /\b(art(?:work)?\s*(?:by|:)|by|cr(?:edit)?s?\s*:?|source|src|via|drawn by|illust(?:ration)?\s*(?:by|:)|🎨|✒️|🖌️)\b/i;
+
+  const uniq = (a) => [...new Set(a.filter(Boolean))];
+
+  function matchesAll(re, text) {
+    if (!text) return [];
+    const out = [];
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) out.push(m[1]);
+    return out;
+  }
+
+  // Artist-ish handles from caption text, credited ones first. No leading @.
+  function findArtistHandles(text, posterHandle) {
+    if (!text) return [];
+    const poster = (posterHandle || "").replace(/^@/, "").toLowerCase();
+    const mentions = matchesAll(MENTION_RE, text).filter(
+      (h) => h.toLowerCase() !== poster
+    );
+    const credited = [];
+    const re = new RegExp(
+      CREDIT_HINT_RE.source + "[^@#]{0,20}@([A-Za-z0-9_]{1,30})",
+      "giu"
+    );
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (m[1] && m[1].toLowerCase() !== poster) credited.push(m[1]);
+    }
+    return uniq([...credited, ...mentions]);
+  }
+
+  function extFromUrl(url) {
+    try {
+      const u = new URL(url, location.href);
+      const q = (u.searchParams.get("format") || "").toLowerCase();
+      if (q) return q === "jpeg" ? "jpg" : q;
+      // bsky: …/<cid>@jpeg  → jpeg
+      const at = u.pathname.split("@").pop().toLowerCase();
+      if (["jpg", "jpeg", "png", "webp", "gif"].includes(at))
+        return at === "jpeg" ? "jpg" : at;
+      const ext = u.pathname.split(".").pop().toLowerCase();
+      if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext))
+        return ext === "jpeg" ? "jpg" : ext;
+    } catch (_) {}
+    return "jpg";
+  }
+
+  function basenameFromUrl(url) {
+    try {
+      const u = new URL(url, location.href);
+      return (u.pathname.split("/").pop() || "")
+        .split("@")[0]
+        .replace(/\.(jpe?g|png|webp|gif)$/i, "");
+    } catch (_) {
+      return "";
+    }
+  }
+
+  // Poster-written image description (alt text). Sites stuff placeholder
+  // values on undescribed images; those must not leak into filenames.
+  const ALT_PLACEHOLDERS = new Set([
+    "image", "images", "photo", "picture", "media", "embedded image",
+    "embedded video", "video", "gif", "alt text",
+  ]);
+
+  function readAlt(img) {
+    const alt = (img.getAttribute("alt") || "").trim();
+    if (!alt) return "";
+    if (ALT_PLACEHOLDERS.has(alt.toLowerCase())) return "";
+    if (/^https?:\/\//i.test(alt)) return ""; // some sites mirror the URL
+    return alt;
+  }
+
+  // ---- X / TWITTER ----------------------------------------------------------
+  const X_EXTRACTOR = {
+    id: "x",
+    test(loc) {
+      return /(^|\.)x\.com$/.test(loc.hostname) || /(^|\.)twitter\.com$/.test(loc.hostname);
+    },
+    extract(img) {
+      // URL identity: on /user/status/id pages — including the /photo/N
+      // lightbox, where the image is NOT inside an <article> — the handle and
+      // status id are in the path. Most reliable source, so read it first.
+      const pathMatch = location.pathname.match(
+        /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/
+      );
+      const urlHandle = pathMatch ? pathMatch[1] : "";
+      const statusId = pathMatch ? pathMatch[2] : "";
+
+      // Scope: the tweet's article. In the lightbox, closest() fails, so find
+      // the side-panel article that links to this exact status id.
+      let article = img.closest("article");
+      if (!article && statusId) {
+        const link = document.querySelector(
+          `article a[href*="/status/${statusId}"]`
+        );
+        article = link ? link.closest("article") : null;
+      }
+      const scope = article || document;
+
+      let poster = "";
+      let handle = "";
+      // Only trust User-Name when scoped to the tweet's own article — a
+      // document-wide hit in the lightbox could belong to a different tweet.
+      const userName = article
+        ? article.querySelector('[data-testid="User-Name"]')
+        : null;
+      if (userName) {
+        const handleEl = [...userName.querySelectorAll("span")].find((s) =>
+          s.textContent.trim().startsWith("@")
+        );
+        handle = handleEl ? handleEl.textContent.trim() : "";
+        poster = userName.textContent.split("@")[0].trim();
+      }
+      // URL beats a DOM guess; and it still works when no article was found.
+      if (urlHandle && (!handle || !article)) handle = "@" + urlHandle;
+      if (!handle) {
+        const a = scope.querySelector('a[role="link"][href^="/"]');
+        const seg = a && a.getAttribute("href").split("/").filter(Boolean)[0];
+        if (seg && !["i", "home", "search", "explore"].includes(seg)) handle = "@" + seg;
+      }
+
+      const textEl = article
+        ? article.querySelector('[data-testid="tweetText"]')
+        : null;
+      const caption = textEl ? textEl.textContent : "";
+
+      const src = img.currentSrc || img.src || "";
+      const idMatch = src.match(/\/media\/([A-Za-z0-9_-]+)/);
+      const mediaId = idMatch ? idMatch[1] : "";
+
+      // Position of this image within the post (1-based) and total count,
+      // for numbering multi-image posts. DOM order = display order.
+      let imageIndex = 0;
+      let imageCount = 0;
+      const mediaImgs = article
+        ? [...article.querySelectorAll('img[src*="/media/"]')]
+        : [];
+      if (mediaImgs.length) {
+        imageCount = mediaImgs.length;
+        let i = mediaImgs.indexOf(img);
+        // Lightbox image isn't inside the article — match by media id.
+        if (i < 0 && mediaId)
+          i = mediaImgs.findIndex((el) => (el.src || "").includes(mediaId));
+        if (i >= 0) imageIndex = i + 1;
+      }
+      // Backup: the lightbox URL carries the position (/status/id/photo/N).
+      const photoM = location.pathname.match(/\/photo\/(\d+)/);
+      if (!imageIndex && photoM) imageIndex = parseInt(photoM[1], 10);
+      // Count unknown but position > 1 proves this is a multi-image post.
+      if (!imageCount && imageIndex > 1) imageCount = imageIndex;
+
+      return {
+        poster,
+        handle,
+        artists: findArtistHandles(caption, handle).map((h) => "@" + h),
+        tags: uniq(matchesAll(HASHTAG_RE, caption)),
+        caption,
+        alt: readAlt(img),
+        imageIndex,
+        imageCount,
+        fallbackBase: mediaId || basenameFromUrl(src),
+        ext: extFromUrl(src),
+      };
+    },
+  };
+
+  // ---- BLUESKY --------------------------------------------------------------
+  const BLUESKY_EXTRACTOR = {
+    id: "bluesky",
+    test(loc) {
+      return /(^|\.)bsky\.app$/.test(loc.hostname);
+    },
+    extract(img) {
+      const src = img.currentSrc || img.src || "";
+      // CID is the segment after the DID. The @ext suffix is OPTIONAL — the
+      // lightbox fullsize URL omits it (".../plain/<did>/<cid>", no "@jpeg").
+      const cidMatch = src.match(/\/plain\/[^/]+\/([^/@?#]+)/);
+      const cid = cidMatch ? cidMatch[1] : "";
+
+      // URL identity: post pages (and the lightbox over them) keep the path
+      // /profile/<handle>/post/<rkey>.
+      const pm = location.pathname.match(/^\/profile\/([^/]+)\/post\//);
+      const urlHandle = pm ? decodeURIComponent(pm[1]) : "";
+
+      // Feed and thread items embed the author handle in their testid:
+      //   data-testid="feedItem-by-<handle>" / "postThreadItem-by-<handle>"
+      const ITEM_SEL =
+        '[data-testid^="feedItem-by-"], [data-testid^="postThreadItem-by-"]';
+      let item = img.closest(ITEM_SEL);
+
+      // Lightbox opened FROM THE FEED: the expanded image is rendered in a
+      // portal at the document root and the URL stays "/", so neither
+      // closest() nor the URL knows the author. But the feed thumbnail of the
+      // same image shares the blob CID (feed_thumbnail vs feed_fullsize, same
+      // <did>/<cid>) — find that thumbnail and use ITS post container.
+      if (!item && cid) {
+        for (const other of document.images) {
+          if (other !== img && other.src && other.src.includes(cid)) {
+            item = other.closest(ITEM_SEL);
+            if (item) break;
+          }
+        }
+      }
+
+      let rawHandle = "";
+      if (item) {
+        const m = (item.getAttribute("data-testid") || "").match(/-by-(.+)$/);
+        if (m) rawHandle = m[1];
+      }
+      if (!rawHandle) rawHandle = urlHandle;
+
+      // Scope for name/caption: the item, else the matching thread post that
+      // is still in the DOM underneath the lightbox.
+      let scope = item;
+      if (!scope && rawHandle) {
+        scope =
+          document.querySelector(
+            `[data-testid="postThreadItem-by-${CSS.escape(rawHandle)}"]`
+          ) || null;
+      }
+
+      // Display name: a profile link with real text (not the avatar, not the
+      // left-nav "Profile" button, not a bare @handle).
+      let poster = "";
+      const linkPool = scope
+        ? scope.querySelectorAll('a[href^="/profile/"]')
+        : rawHandle
+          ? document.querySelectorAll(
+              `a[href^="/profile/${CSS.escape(rawHandle)}"]`
+            )
+          : [];
+      for (const a of linkPool) {
+        const t = (a.textContent || "").trim();
+        if (t && t !== "Profile" && !t.startsWith("@")) {
+          poster = t;
+          break;
+        }
+      }
+      // Some layouts glue the handle onto the name text; strip it.
+      poster = poster.replace(/@[\w.:-]+$/, "").trim();
+
+      const handle = rawHandle
+        ? "@" + rawHandle.replace(/\.bsky\.social$/i, "")
+        : "";
+
+      const textEl = scope
+        ? scope.querySelector('[data-testid="postText"]')
+        : null;
+      const caption = textEl ? textEl.textContent : "";
+
+      // Position within the post for multi-image numbering. The clicked img
+      // may be the lightbox copy, so match by CID against the item's images.
+      let imageIndex = 0;
+      let imageCount = 0;
+      const postImgs = item
+        ? [...item.querySelectorAll('img[src*="/img/feed_"]')]
+        : [];
+      if (postImgs.length) {
+        imageCount = postImgs.length;
+        let i = postImgs.indexOf(img);
+        if (i < 0 && cid)
+          i = postImgs.findIndex((el) => (el.src || "").includes(cid));
+        if (i >= 0) imageIndex = i + 1;
+      }
+
+      return {
+        poster,
+        handle,
+        artists: findArtistHandles(caption, handle).map((h) => "@" + h),
+        tags: uniq(matchesAll(HASHTAG_RE, caption)),
+        caption,
+        alt: readAlt(img),
+        imageIndex,
+        imageCount,
+        fallbackBase: cid || basenameFromUrl(src),
+        ext: extFromUrl(src),
+      };
+    },
+  };
+
+  // ---- GENERIC (only reached if matched-site selectors above miss) ----------
+  const GENERIC_EXTRACTOR = {
+    id: "generic",
+    test() {
+      return true;
+    },
+    extract(img) {
+      const src = img.currentSrc || img.src || "";
+      const fig = img.closest("figure");
+      const cap =
+        (img.getAttribute("alt") || "").trim() ||
+        (fig && fig.querySelector("figcaption")
+          ? fig.querySelector("figcaption").textContent.trim()
+          : "");
+      return {
+        poster: "",
+        handle: "",
+        artists: [],
+        tags: uniq(matchesAll(HASHTAG_RE, cap)),
+        caption: cap,
+        alt: readAlt(img),
+        fallbackBase: basenameFromUrl(src),
+        ext: extFromUrl(src),
+      };
+    },
+  };
+
+  window.SIS_EXTRACTORS = [X_EXTRACTOR, BLUESKY_EXTRACTOR, GENERIC_EXTRACTOR];
+})();
+
+/* =============================================================================
+ * content.js  —  content-script world (loaded after extractors.js)
+ *
+ * Tracks the element under the most recent right-click (the contextMenus API
+ * gives us the image URL but not the DOM node), then on request builds the
+ * final filename: poster (@handle) - @artist #tags.ext, or the site's random
+ * string if nothing useful was found.
+ * ========================================================================== */
+
+(function () {
+  "use strict";
+
+  const ext = globalThis.browser ?? globalThis.chrome;
+
+  let lastTarget = null;
+  document.addEventListener(
+    "contextmenu",
+    (e) => {
+      lastTarget = e.target;
+    },
+    true // capture, so we still see it if the page stops propagation
+  );
+
+  const pickExtractor = () =>
+    (window.SIS_EXTRACTORS || []).find((x) => x.test(location)) || null;
+
+  function resolveImage(srcUrl) {
+    if (lastTarget) {
+      if (lastTarget.tagName === "IMG") return lastTarget;
+      const inner = lastTarget.querySelector && lastTarget.querySelector("img");
+      if (inner) return inner;
+      const up = lastTarget.closest && lastTarget.closest("img");
+      if (up) return up;
+    }
+    if (srcUrl) {
+      const imgs = [...document.images];
+      return (
+        imgs.find((i) => i.currentSrc === srcUrl || i.src === srcUrl) || null
+      );
+    }
+    return null;
+  }
+
+  // ---- filename assembly ----------------------------------------------------
+
+  // Per-token cleaner. Keeps Unicode letters/numbers so accents survive
+  // (Māui stays Māui), drops @ and #, and turns EVERY other character —
+  // including everything illegal on Windows or Linux (\ / : * ? " < > |, control
+  // chars, etc.) — into a single underscore separator.
+  function safeToken(s) {
+    return (s || "")
+      .normalize("NFC")
+      .replace(/[@#]/g, "")
+      .replace(/[^\p{L}\p{N}]+/gu, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  // Low-information words to skip when condensing alt text into keywords.
+  const STOPWORDS = new Set([
+    "a", "an", "the", "of", "in", "on", "at", "with", "and", "or", "to",
+    "is", "are", "was", "were", "its", "it", "this", "that", "there",
+  ]);
+  const ALT_MAX_WORDS = 4;
+  const CAPTION_MAX_WORDS = 4;
+
+  // Condense free text into filename keywords: skip @mentions, #tags, and
+  // links (captured separately), drop stopwords, cap the count.
+  // "XJ-9 is my favorite #fanart" → ["XJ_9", "my", "favorite"]-ish minus stops.
+  function textKeywords(text, max) {
+    if (!text) return [];
+    return text
+      .split(/\s+/)
+      .filter((w) => !/^[@#]/.test(w) && !/^https?:\/\//i.test(w))
+      .map(safeToken)
+      .filter((w) => w.length > 1 && !STOPWORDS.has(w.toLowerCase()))
+      .slice(0, max);
+  }
+
+  // Flat underscore format:
+  //   poster_handle_artist_tag_captionwords_altwords  (accents kept)
+  function buildBase(d) {
+    const poster = safeToken(d.poster);
+    const handle = safeToken(d.handle);
+
+    const parts = [];
+    if (poster) parts.push(poster);
+    // Skip the handle when it just repeats the poster name (common on Bluesky).
+    if (handle && handle.toLowerCase() !== poster.toLowerCase()) parts.push(handle);
+    for (const a of d.artists || []) {
+      const t = safeToken(a);
+      if (t) parts.push(t);
+    }
+    for (const t of d.tags || []) {
+      const k = safeToken(t);
+      if (k) parts.push(k);
+    }
+    // Post-text keywords, then image-description (alt) keywords, deduped.
+    const seen = new Set(parts.map((p) => p.toLowerCase()));
+    for (const w of [
+      ...textKeywords(d.caption, CAPTION_MAX_WORDS),
+      ...textKeywords(d.alt, ALT_MAX_WORDS),
+    ]) {
+      if (!seen.has(w.toLowerCase())) {
+        parts.push(w);
+        seen.add(w.toLowerCase());
+      }
+    }
+    return parts.join("_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  }
+
+  // Windows reserved device names — a file named exactly these won't save.
+  const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+  // Composed name WITHOUT extension. The background script appends the right
+  // extension after it decides the output format (it may convert webp→png).
+  function baseName(d) {
+    let base = buildBase(d);
+    const smart = !!base;
+    if (!base) base = safeToken(d.fallbackBase); // fall back to the random string
+    base = (base || "image").slice(0, 180).replace(/^_+|_+$/g, "") || "image";
+    // Multi-image posts get a position suffix (01, 02, …) so each save is
+    // distinct. Single-image posts and CDN-string fallbacks stay unsuffixed —
+    // fallback names are already unique per image.
+    if (smart && d.imageCount > 1 && d.imageIndex > 0) {
+      base += String(d.imageIndex).padStart(2, "0");
+    }
+    if (RESERVED.test(base)) base += "_";
+    return base;
+  }
+
+  // ---- respond to the background script -------------------------------------
+
+  ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || msg.type !== "SIS_EXTRACT") return false;
+    try {
+      const img = resolveImage(msg.srcUrl);
+      const extractor = pickExtractor();
+      if (!img || !extractor) {
+        sendResponse({ ok: false });
+        return true;
+      }
+      const data = extractor.extract(img);
+      sendResponse({ ok: true, base: baseName(data), urlExt: data.ext });
+    } catch (err) {
+      sendResponse({ ok: false, reason: String(err && err.message) });
+    }
+    return true;
+  });
+})();
