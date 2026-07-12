@@ -1,4 +1,4 @@
-# Privacy Policy — Socialnamer
+# Privacy Policy - Socialnamer
 
 **Last updated:** July 11, 2026
 
@@ -18,8 +18,8 @@ When you right-click an image and choose **Download with Socialnamer**, the
 extension:
 
 1. **Reads the visible content of the page you're on** (the post's author,
-   handle, caption text, hashtags, and image alt text) — in your browser,
-   locally — solely to build the filename. This information is placed into
+   handle, caption text, hashtags, and image alt text) - in your browser,
+   locally - solely to build the filename. This information is placed into
    the save dialog's filename field and is not retained, logged, or
    transmitted by the extension.
 2. **Fetches the image file itself** from the site's image CDN
@@ -30,8 +30,8 @@ extension:
    never sent anywhere other than to your own disk.
 3. **In one specific case, makes one read-only lookup:** if you save from a
    direct `cdn.bsky.app` image URL (an image opened in its own tab, with no
-   post on screen), the extension resolves the author's public DID — which is
-   part of that URL — to a handle via Bluesky's public PLC directory
+   post on screen), the extension resolves the author's public DID - which is
+   part of that URL - to a handle via Bluesky's public PLC directory
    (`https://plc.directory`). The request contains that public DID and
    nothing else: no cookies, no identifiers, nothing about you or your
    browsing. If the lookup fails, the extension simply falls back to the
@@ -45,8 +45,8 @@ requests of any kind.
 - **No collection or storage.** Socialnamer does not collect, store, or
   process personal information, browsing history, or usage data. It has no
   database, no local storage of user data, and no memory of past saves.
-- **No transmission.** Nothing you do — pages visited, images saved,
-  filenames generated — is sent to the developer or to any third party.
+- **No transmission.** Nothing you do - pages visited, images saved,
+  filenames generated - is sent to the developer or to any third party.
 - **No analytics or telemetry.** There is no tracking, crash reporting,
   fingerprinting, or usage measurement of any kind.
 - **No remote code.** All code ships inside the extension package and is
