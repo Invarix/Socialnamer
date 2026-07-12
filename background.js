@@ -1,5 +1,5 @@
 /* =============================================================================
- * background.js  —  Chromium MV3 service worker
+ * background.js  -  Chromium MV3 service worker
  *
  * Right-click an image on a supported site → "Download with Socialnamer"
  * submenu. Picks a smart filename from the post (poster/handle/artist/tags,
@@ -30,7 +30,7 @@ const SITE_PATTERNS = [
   "https://x.com/*",
   "https://twitter.com/*",
   "https://bsky.app/*",
-  // Direct image URLs (opened in their own tab) — no post DOM here, but the
+  // Direct image URLs (opened in their own tab) - no post DOM here, but the
   // menu should still work; the background derives what it can from the URL.
   "https://cdn.bsky.app/*",
   "https://pbs.twimg.com/*",
@@ -112,7 +112,7 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
     blob = await (await fetch(srcUrl)).blob();
     served = (await sniffFormat(blob)) || extFromUrl(srcUrl) || urlExt;
   } catch (_) {
-    /* couldn't read bytes (no CDN permission / network) — fall back below */
+    /* couldn't read bytes (no CDN permission / network) - fall back below */
   }
 
   // Decide target format from the chosen menu item.
@@ -177,7 +177,7 @@ async function saveConverted(blob, fmt, filename, srcFallbackUrl) {
 // For a direct cdn.bsky.app image URL there is no post DOM at all, but the
 // URL carries the author DID and the image blob CID. The public API lets us
 // find the post that embeds that exact blob and recover author, text, tags,
-// and alt — the same data the content script reads on bsky.app itself.
+// and alt - the same data the content script reads on bsky.app itself.
 
 const BSKY_API = "https://public.api.bsky.app/xrpc";
 
@@ -279,7 +279,7 @@ function bgBskyBase(p) {
   if (handle && handle.toLowerCase() !== poster.toLowerCase()) parts.push(handle);
   const seen = new Set(parts.map((x) => x.toLowerCase()));
   const text = p.text || "";
-  // hashtags first, then caption keywords, then alt keywords — same order
+  // hashtags first, then caption keywords, then alt keywords - same order
   // and caps as the content script.
   const tags = [...text.matchAll(/#([\p{L}\p{N}_]{1,40})/gu)].map((m) => bgToken(m[1]));
   for (const w of [...tags, ...bgWords(text, 4), ...bgWords(p.alt, 4)]) {

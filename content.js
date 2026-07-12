@@ -1,11 +1,11 @@
 /* =============================================================================
- * extractors.js  —  content-script world
+ * extractors.js  -  content-script world
  *
  * One extractor per site family. Given the right-clicked <img>, returns the
  * pieces of a filename: poster name, @handle, artist shout-outs, hashtags, plus
  * a fallback (the site's random string) and the file extension to keep.
  *
- * The DOM selectors are the fragile part — X and Bluesky ship obfuscated,
+ * The DOM selectors are the fragile part - X and Bluesky ship obfuscated,
  * shifting markup, so we lean on data-testid / href shapes and fail soft
  * (omit a field rather than throw). This file is where you patch when a site
  * reshuffles its layout. Add a site by inserting an extractor before GENERIC.
@@ -98,8 +98,8 @@
       return /(^|\.)x\.com$/.test(loc.hostname) || /(^|\.)twitter\.com$/.test(loc.hostname);
     },
     extract(img) {
-      // URL identity: on /user/status/id pages — including the /photo/N
-      // lightbox, where the image is NOT inside an <article> — the handle and
+      // URL identity: on /user/status/id pages - including the /photo/N
+      // lightbox, where the image is NOT inside an <article> - the handle and
       // status id are in the path. Most reliable source, so read it first.
       const pathMatch = location.pathname.match(
         /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/
@@ -120,7 +120,7 @@
 
       let poster = "";
       let handle = "";
-      // Only trust User-Name when scoped to the tweet's own article — a
+      // Only trust User-Name when scoped to the tweet's own article - a
       // document-wide hit in the lightbox could belong to a different tweet.
       const userName = article
         ? article.querySelector('[data-testid="User-Name"]')
@@ -159,7 +159,7 @@
       if (mediaImgs.length) {
         imageCount = mediaImgs.length;
         let i = mediaImgs.indexOf(img);
-        // Lightbox image isn't inside the article — match by media id.
+        // Lightbox image isn't inside the article - match by media id.
         if (i < 0 && mediaId)
           i = mediaImgs.findIndex((el) => (el.src || "").includes(mediaId));
         if (i >= 0) imageIndex = i + 1;
@@ -193,7 +193,7 @@
     },
     extract(img) {
       const src = img.currentSrc || img.src || "";
-      // CID is the segment after the DID. The @ext suffix is OPTIONAL — the
+      // CID is the segment after the DID. The @ext suffix is OPTIONAL - the
       // lightbox fullsize URL omits it (".../plain/<did>/<cid>", no "@jpeg").
       const cidMatch = src.match(/\/plain\/[^/]+\/([^/@?#]+)/);
       const cid = cidMatch ? cidMatch[1] : "";
@@ -213,7 +213,7 @@
       // portal at the document root and the URL stays "/", so neither
       // closest() nor the URL knows the author. But the feed thumbnail of the
       // same image shares the blob CID (feed_thumbnail vs feed_fullsize, same
-      // <did>/<cid>) — find that thumbnail and use ITS post container.
+      // <did>/<cid>) - find that thumbnail and use ITS post container.
       if (!item && cid) {
         for (const other of document.images) {
           if (other !== img && other.src && other.src.includes(cid)) {
@@ -330,7 +330,7 @@
 })();
 
 /* =============================================================================
- * content.js  —  content-script world (loaded after extractors.js)
+ * content.js  -  content-script world (loaded after extractors.js)
  *
  * Tracks the element under the most recent right-click (the contextMenus API
  * gives us the image URL but not the DOM node), then on request builds the
@@ -375,9 +375,9 @@
   // ---- filename assembly ----------------------------------------------------
 
   // Per-token cleaner. Keeps Unicode letters/numbers so accents survive
-  // (Māui stays Māui), drops @ and #, and turns EVERY other character —
+  // (Māui stays Māui), drops @ and #, and turns EVERY other character  - 
   // including everything illegal on Windows or Linux (\ / : * ? " < > |, control
-  // chars, etc.) — into a single underscore separator.
+  // chars, etc.) - into a single underscore separator.
   function safeToken(s) {
     return (s || "")
       .normalize("NFC")
@@ -440,7 +440,7 @@
     return parts.join("_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
   }
 
-  // Windows reserved device names — a file named exactly these won't save.
+  // Windows reserved device names - a file named exactly these won't save.
   const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
   // Composed name WITHOUT extension. The background script appends the right
@@ -451,7 +451,7 @@
     if (!base) base = safeToken(d.fallbackBase); // fall back to the random string
     base = (base || "image").slice(0, 180).replace(/^_+|_+$/g, "") || "image";
     // Multi-image posts get a position suffix (01, 02, …) so each save is
-    // distinct. Single-image posts and CDN-string fallbacks stay unsuffixed —
+    // distinct. Single-image posts and CDN-string fallbacks stay unsuffixed  - 
     // fallback names are already unique per image.
     if (smart && d.imageCount > 1 && d.imageIndex > 0) {
       base += String(d.imageIndex).padStart(2, "0");
