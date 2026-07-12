@@ -5,7 +5,7 @@
 Right-click an image on X/Twitter or Bluesky → **Download with Socialnamer**.
 It opens a save dialog with an editable filename field, pre-filled from the
 post - poster, handle, artist credit, tags, caption keywords - and can convert
-the file out of webp on the way down. No more `HLTeLjZWsAAe9LF.jpg`.
+the file out of webp on the way down. No more `HiJKlMNoP.jpg`.
 
 ## Filename
 
