@@ -448,8 +448,10 @@
   const pickExtractor = () =>
     (window.SIS_EXTRACTORS || []).find((x) => x.test(location)) || null;
 
-  function resolveImage(srcUrl) {
-    if (lastTarget) {
+  function resolveImage(srcUrl, byUrlOnly) {
+    // byUrlOnly is set for cross-tab recovery queries: this tab was not the
+    // one right-clicked, so its lastTarget is stale and must be ignored.
+    if (!byUrlOnly && lastTarget) {
       if (lastTarget.tagName === "IMG") return lastTarget;
       const inner = lastTarget.querySelector && lastTarget.querySelector("img");
       if (inner) return inner;
@@ -458,9 +460,20 @@
     }
     if (srcUrl) {
       const imgs = [...document.images];
-      return (
-        imgs.find((i) => i.currentSrc === srcUrl || i.src === srcUrl) || null
+      const exact = imgs.find(
+        (i) => i.currentSrc === srcUrl || i.src === srcUrl
       );
+      if (exact) return exact;
+      // Rendition-tolerant match: Mastodon keeps the same hash filename
+      // across small/original, and Bluesky keeps the CID across renditions,
+      // so the basename links a direct media URL back to its feed thumbnail.
+      const nb = basename(srcUrl);
+      if (nb) {
+        const byName = imgs.find(
+          (i) => basename(i.currentSrc || i.src) === nb
+        );
+        if (byName) return byName;
+      }
     }
     return null;
   }
@@ -558,7 +571,7 @@
   ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || msg.type !== "SIS_EXTRACT") return false;
     try {
-      const img = resolveImage(msg.srcUrl);
+      const img = resolveImage(msg.srcUrl, !!msg.byUrlOnly);
       const extractor = pickExtractor();
       if (!img || !extractor) {
         sendResponse({ ok: false });

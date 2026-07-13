@@ -98,6 +98,20 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
     urlExt = extFromUrl(srcUrl) || urlExt;
   }
 
+  // Direct media URLs (image opened in its own tab): the page has no post
+  // DOM, but the tab the user came from usually still does. Ask the content
+  // scripts in open supported-site tabs to locate this image by its
+  // rendition-stable basename and extract from the post there.
+  if (!gotSmart) {
+    const found = await findInOpenTabs(srcUrl);
+    if (found) {
+      base = found.base || base;
+      urlExt = found.urlExt || urlExt;
+      if (found.downloadUrl) srcUrl = found.downloadUrl;
+      gotSmart = true;
+    }
+  }
+
   // Direct cdn.bsky.app URLs (image opened in its own tab): no post DOM, but
   // the URL carries the author DID and blob CID. Find the post via the public
   // AppView API to recover author, text, tags, and alt; fall back to just the
@@ -193,6 +207,39 @@ async function saveConverted(blob, fmt, filename, srcFallbackUrl) {
 }
 
 // ---- helpers ---------------------------------------------------------------
+
+// Ask content scripts in open supported-site tabs to locate an image by URL
+// (rendition-tolerant basename matching happens on their side) and return the
+// extracted naming info. Works without the "tabs" permission because
+// tabs.query with url filters is granted by our existing host permissions.
+async function findInOpenTabs(srcUrl) {
+  const pageUrls = [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://bsky.app/*",
+    "https://pawoo.net/*",
+    "https://baraag.net/*",
+  ];
+  let tabs = [];
+  try {
+    tabs = await ext.tabs.query({ url: pageUrls });
+  } catch (_) {
+    return null;
+  }
+  for (const t of tabs) {
+    try {
+      const resp = await ext.tabs.sendMessage(t.id, {
+        type: "SIS_EXTRACT",
+        srcUrl,
+        byUrlOnly: true,
+      });
+      if (resp && resp.ok && resp.base) return resp;
+    } catch (_) {
+      /* tab without a live content script; try the next one */
+    }
+  }
+  return null;
+}
 
 // -- Bluesky public AppView API (unauthenticated, read-only) --
 // For a direct cdn.bsky.app image URL there is no post DOM at all, but the

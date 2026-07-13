@@ -1,5 +1,3 @@
-[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
-
 # Socialnamer (Chromium, MV3)
 
 Right-click an image on X/Twitter, Bluesky, or a supported Mastodon instance → **Download with Socialnamer**.
@@ -35,11 +33,11 @@ All parts are joined by underscores into a flat, ASCII filename:
    no suffix.
 7. Nothing found → falls back to the site's random string (e.g. the media id).
 
-Saving from a direct `cdn.bsky.app` image URL (no post on screen) recovers the
-author only: the DID in the URL is resolved to a handle via the public PLC
-directory (`plc.directory`, read-only, used only when on-page extraction found
-nothing). Post text, tags, and alt text can't be recovered from a bare blob
-URL - save from the post or lightbox to get the full name.
+Saving from a direct media URL (an image opened in its own tab) still works:
+if the tab you came from is open, the extension finds the post there by the
+file's rendition-stable name and builds the full smart filename. Without such
+a tab, Bluesky still recovers the author via the public PLC directory; other
+sites fall back to the file hash, since bare media URLs carry no author info.
 
 Example: a post by *Kalani o Māui* (@MauiBoyMacro) →
 `Kalani_o_Māui_MauiBoyMacro.jpg`. The field stays editable, so you can add
@@ -96,4 +94,3 @@ background.js          submenu, format sniffing, conversion, save
 content.js             per-site extractors (top of file) + filename assembly
 icon16/32/48/128.png   toolbar + management icons (referenced by the manifest)
 ```
-[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
