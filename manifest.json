@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Socialnamer",
-  "version": "0.2.4",
-  "description": "Save images from X and Bluesky with a smart filename from the post: poster, handle, artist, tags. Convert WebP to PNG or JPG.",
+  "version": "0.2.5",
+  "description": "Save images from X, Bluesky, and Mastodon with a smart filename from the post: poster, handle, artist, tags. WebP to PNG or JPG.",
   "icons": {
     "16": "icon16.png",
     "32": "icon32.png",
