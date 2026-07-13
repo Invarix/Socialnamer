@@ -503,7 +503,7 @@
 
   // Condense free text into filename keywords: skip @mentions, #tags, and
   // links (captured separately), drop stopwords, cap the count.
-  // "XJ-9 is my favorite #fanart" → ["XJ_9", "my", "favorite"]-ish minus stops.
+  // "Character doodle #fanart" → ["Character", "doodle"], tags and stops removed.
   function textKeywords(text, max) {
     if (!text) return [];
     return text
