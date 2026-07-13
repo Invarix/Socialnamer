@@ -1,3 +1,5 @@
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
+
 # Socialnamer (Chromium, MV3)
 
 Right-click an image on X/Twitter, Bluesky, or a supported Mastodon instance → **Download with Socialnamer**.
@@ -94,3 +96,4 @@ background.js          submenu, format sniffing, conversion, save
 content.js             per-site extractors (top of file) + filename assembly
 icon16/32/48/128.png   toolbar + management icons (referenced by the manifest)
 ```
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
