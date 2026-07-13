@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Socialnamer",
-  "version": "0.1.11",
+  "version": "0.2.1",
   "description": "Save images from X and Bluesky with a smart filename from the post: poster, handle, artist, tags. Convert WebP to PNG or JPG.",
   "icons": {
     "16": "icon16.png",
@@ -28,7 +28,11 @@
     "https://bsky.app/*",
     "https://*.twimg.com/*",
     "https://*.bsky.app/*",
-    "https://public.api.bsky.app/*"
+    "https://pawoo.net/*",
+    "https://*.pawoo.net/*",
+    "https://baraag.net/*",
+    "https://*.baraag.net/*",
+    "https://plc.directory/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -38,7 +42,9 @@
       "matches": [
         "https://x.com/*",
         "https://twitter.com/*",
-        "https://bsky.app/*"
+        "https://bsky.app/*",
+        "https://pawoo.net/*",
+        "https://baraag.net/*"
       ],
       "js": [
         "content.js"

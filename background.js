@@ -30,6 +30,11 @@ const SITE_PATTERNS = [
   "https://x.com/*",
   "https://twitter.com/*",
   "https://bsky.app/*",
+  // Mastodon instances (one generic extractor covers them all)
+  "https://pawoo.net/*",
+  "https://*.pawoo.net/*",
+  "https://baraag.net/*",
+  "https://*.baraag.net/*",
   // Direct image URLs (opened in their own tab) - no post DOM here, but the
   // menu should still work; the background derives what it can from the URL.
   "https://cdn.bsky.app/*",
@@ -67,7 +72,7 @@ ext.runtime.onStartup && ext.runtime.onStartup.addListener(buildMenu);
 
 ext.contextMenus.onClicked.addListener(async (info, tab) => {
   if (![MENU.keep, MENU.jpg, MENU.png].includes(info.menuItemId)) return;
-  const srcUrl = info.srcUrl;
+  let srcUrl = info.srcUrl;
   if (!srcUrl || !tab) return;
 
   // Smart filename base from the content script (no extension yet).
@@ -83,6 +88,9 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
     if (resp && resp.ok) {
       base = resp.base || base;
       urlExt = resp.urlExt || urlExt;
+      // Extractor may know a better rendition of the same file, e.g.
+      // Mastodon's /original/ next to the /small/ thumb that was clicked.
+      if (resp.downloadUrl) srcUrl = resp.downloadUrl;
       gotSmart = true;
     }
   } catch (_) {
@@ -163,8 +171,21 @@ async function saveConverted(blob, fmt, filename, srcFallbackUrl) {
     const out = await canvas.convertToBlob(
       fmt === "png" ? { type: mime } : { type: mime, quality: 0.95 }
     );
-    const dataUrl = await blobToDataURL(out);
-    await ext.downloads.download({ url: dataUrl, filename, saveAs: true });
+    // Firefox's event-page background has URL.createObjectURL; blob URLs are
+    // more robust than large base64 data URLs. Chrome's service worker lacks
+    // it, so fall back to a data URL there.
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      const blobUrl = URL.createObjectURL(out);
+      try {
+        await ext.downloads.download({ url: blobUrl, filename, saveAs: true });
+      } finally {
+        // Revoke after a grace period so the download can start reading.
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      }
+    } else {
+      const dataUrl = await blobToDataURL(out);
+      await ext.downloads.download({ url: dataUrl, filename, saveAs: true });
+    }
   } catch (err) {
     console.error("[Socialnamer] convert failed, saving original:", err);
     await ext.downloads.download({ url: srcFallbackUrl, saveAs: true });

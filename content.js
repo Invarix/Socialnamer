@@ -299,6 +299,99 @@
     },
   };
 
+  // ---- MASTODON instances ----------------------------------------------------
+  // Mastodon's web UI shares markup across instances, so one extractor covers
+  // them all. To support another instance, add its domain here, to `matches`
+  // in manifest.json, and to SITE_PATTERNS + host_permissions as needed.
+  const MASTODON_INSTANCES = ["pawoo.net", "baraag.net"];
+
+  const MASTODON_EXTRACTOR = {
+    id: "mastodon",
+    test(loc) {
+      const h = loc.hostname;
+      return MASTODON_INSTANCES.some((d) => h === d || h.endsWith("." + d));
+    },
+    extract(img) {
+      const src = img.currentSrc || img.src || "";
+
+      // URL identity: status pages are /@user/<id> or /@user@remote.tld/<id>.
+      const pm = location.pathname.match(/^\/@([^/@]+)(?:@[^/]+)?\/\d+/);
+      const urlHandle = pm ? decodeURIComponent(pm[1]) : "";
+
+      // Container: the status the image belongs to. In the media lightbox the
+      // img lives in a modal at document root, so fall back to matching the
+      // media file's basename against gallery images still in the page.
+      let item =
+        img.closest(".detailed-status") || img.closest(".status") || null;
+      const base = basenameFromUrl(src);
+      if (!item && base) {
+        for (const other of document.images) {
+          if (other !== img && (other.src || "").includes(base)) {
+            item =
+              other.closest(".detailed-status") ||
+              other.closest(".status") ||
+              null;
+            if (item) break;
+          }
+        }
+      }
+
+      // Author: display name and @handle from the status header.
+      let poster = "";
+      let handle = "";
+      if (item) {
+        const nameEl = item.querySelector(".display-name__html");
+        if (nameEl) poster = (nameEl.textContent || "").trim();
+        const accEl = item.querySelector(".display-name__account");
+        if (accEl) {
+          // "@user" locally or "@user@remote.tld" for federated authors.
+          const acc = (accEl.textContent || "").trim().replace(/^@/, "");
+          handle = "@" + acc.split("@")[0];
+        }
+      }
+      if (!handle && urlHandle) handle = "@" + urlHandle;
+
+      // Caption: status text. Hashtags render inside it, so HASHTAG_RE works.
+      const textEl = item ? item.querySelector(".status__content") : null;
+      const caption = textEl ? textEl.textContent : "";
+
+      // Position within the post's media gallery for multi-image numbering.
+      let imageIndex = 0;
+      let imageCount = 0;
+      const galleryImgs = item
+        ? [...item.querySelectorAll(".media-gallery img")]
+        : [];
+      if (galleryImgs.length) {
+        imageCount = galleryImgs.length;
+        let i = galleryImgs.indexOf(img);
+        if (i < 0 && base)
+          i = galleryImgs.findIndex((el) => (el.src || "").includes(base));
+        if (i >= 0) imageIndex = i + 1;
+      }
+
+      // Quality upgrade: gallery thumbs are the /small/ rendition and the
+      // full file lives at /original/ on the same path. Hand the background
+      // the better URL to download.
+      const downloadUrl = /\/small\//.test(src)
+        ? src.replace("/small/", "/original/")
+        : "";
+
+      return {
+        poster,
+        handle,
+        artists: findArtistHandles(caption, handle).map((h) => "@" + h),
+        tags: uniq(matchesAll(HASHTAG_RE, caption)),
+        caption,
+        alt: readAlt(img),
+        imageIndex,
+        imageCount,
+        downloadUrl,
+        fallbackBase: base,
+        ext: extFromUrl(src),
+      };
+    },
+  };
+
   // ---- GENERIC (only reached if matched-site selectors above miss) ----------
   const GENERIC_EXTRACTOR = {
     id: "generic",
@@ -326,7 +419,7 @@
     },
   };
 
-  window.SIS_EXTRACTORS = [X_EXTRACTOR, BLUESKY_EXTRACTOR, GENERIC_EXTRACTOR];
+  window.SIS_EXTRACTORS = [X_EXTRACTOR, BLUESKY_EXTRACTOR, MASTODON_EXTRACTOR, GENERIC_EXTRACTOR];
 })();
 
 /* =============================================================================
@@ -472,7 +565,7 @@
         return true;
       }
       const data = extractor.extract(img);
-      sendResponse({ ok: true, base: baseName(data), urlExt: data.ext });
+      sendResponse({ ok: true, base: baseName(data), urlExt: data.ext, downloadUrl: data.downloadUrl || "" });
     } catch (err) {
       sendResponse({ ok: false, reason: String(err && err.message) });
     }
