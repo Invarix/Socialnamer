@@ -28,14 +28,16 @@ extension:
    reads the file's first bytes to identify its true format and, if you chose
    a conversion option, re-encodes it locally before saving. The image is
    never sent anywhere other than to your own disk.
-3. **In one specific case, makes one read-only lookup:** if you save from a
-   direct `cdn.bsky.app` image URL (an image opened in its own tab, with no
-   post on screen), the extension resolves the author's public DID - which is
-   part of that URL - to a handle via Bluesky's public PLC directory
-   (`https://plc.directory`). The request contains that public DID and
-   nothing else: no cookies, no identifiers, nothing about you or your
-   browsing. If the lookup fails, the extension simply falls back to the
-   default filename.
+3. **In one specific case, makes read-only public lookups:** if you save
+   from a direct media URL (an image opened in its own tab, with no post on
+   screen), the extension recovers the post details from the platform's own
+   public, unauthenticated endpoints: on Bluesky it queries the public
+   AppView API (`public.api.bsky.app`) with the author's public DID from the
+   image URL; on Pixiv it queries the public artwork endpoint on
+   `www.pixiv.net` with the artwork id from the image URL. These requests
+   identify the artwork or author being saved, never you or your browsing.
+   If a lookup fails, the extension simply falls back to the default
+   filename.
 
 That is the complete list of network activity. The extension makes no other
 requests of any kind.
@@ -62,9 +64,9 @@ requests of any kind.
 |---|---|
 | `contextMenus` | To add the **Download with Socialnamer** item to the right-click menu. |
 | `downloads` | To open the save dialog pre-filled with the generated filename. |
-| Host access: `x.com`, `twitter.com`, `bsky.app` | To read the post content (author, caption, tags, alt text) on the page you invoked the extension on, so the filename can be built. |
+| Host access: `x.com`, `twitter.com`, `bsky.app`, supported Mastodon instances | To read the post content (author, caption, tags, alt text) on the page you invoked the extension on, so the filename can be built. |
 | Host access: `*.twimg.com`, `*.bsky.app` | To fetch the image bytes for format detection and optional JPG/PNG conversion. |
-| Host access: `plc.directory` | Read-only DID→handle lookup, used only when saving from a direct CDN image URL (see above). |
+| Host access: `www.pixiv.net`, `i.pximg.net` | Reads the artwork page for the filename; fetches image bytes for saving and conversion (with the Referer header the site requires); read-only artwork lookup for direct image URLs (see above). |
 
 The extension reads pages only on the sites listed above, and only in service
 of the save you initiated.
