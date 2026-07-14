@@ -392,6 +392,109 @@
     },
   };
 
+  // ---- PIXIV -----------------------------------------------------------------
+  // Image URLs carry the artwork id and page index: <id>_p<N> with rendition
+  // suffixes like _master1200 or _custom1200 on the non-original copies. The
+  // original file lives under /img-original/ with an unknowable extension, so
+  // the extractor emits candidate URLs and the background tries them in order.
+  const PIXIV_EXTRACTOR = {
+    id: "pixiv",
+    test(loc) {
+      const h = loc.hostname;
+      return h === "www.pixiv.net" || h === "pixiv.net" || h.endsWith(".pixiv.net");
+    },
+    extract(img) {
+      const src = img.currentSrc || img.src || "";
+
+      // Artwork id and zero-based page index from the media URL.
+      const pm = src.match(
+        /\/img\/\d{4}\/\d{2}\/\d{2}\/\d{2}\/\d{2}\/\d{2}\/(\d+)_p(\d+)/
+      );
+      const artId = pm ? pm[1] : (location.pathname.match(/^\/(?:en\/)?artworks\/(\d+)/) || [])[1] || "";
+      const page = pm ? parseInt(pm[2], 10) : 0;
+
+      // Author: profile links use /users/<id>. Prefer one with visible text.
+      let poster = "";
+      const scope =
+        img.closest("figure") ||
+        img.closest("main") ||
+        document;
+      const pools = [scope, document];
+      for (const pool of pools) {
+        for (const a of pool.querySelectorAll('a[href*="/users/"]')) {
+          const t = (a.textContent || "").trim();
+          if (t && !/^\d+$/.test(t)) {
+            poster = t;
+            break;
+          }
+        }
+        if (poster) break;
+      }
+
+      // Title and description: h1 on artwork pages; figcaption holds the
+      // description block. Both feed the caption keyword budget.
+      const h1 = document.querySelector("h1");
+      const figcap = document.querySelector("figcaption");
+      const caption = [
+        h1 ? h1.textContent.trim() : "",
+        figcap ? figcap.textContent.trim() : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      // Tags: pixiv renders them as /tags/ links. Dedupe, keep order.
+      const tags = uniq(
+        [...document.querySelectorAll('a[href*="/tags/"]')]
+          .map((a) => (a.textContent || "").trim())
+          .filter((t) => t && t.length <= 40 && !t.includes("#"))
+      ).slice(0, 8);
+
+      // Multi-image galleries: count distinct page indexes for this artwork
+      // among images on the page. The page index itself proves multi when
+      // it is above zero even if the count is unknowable.
+      let imageCount = 0;
+      if (artId) {
+        const pages = new Set();
+        for (const el of document.images) {
+          const m = (el.src || "").match(
+            new RegExp("/" + artId + "_p(\\d+)")
+          );
+          if (m) pages.add(m[1]);
+        }
+        imageCount = pages.size;
+      }
+      if (!imageCount && page > 0) imageCount = page + 1;
+      const imageIndex = pm ? page + 1 : 0;
+
+      // Original-rendition candidates (png first, jpg second).
+      let downloadUrls = [];
+      if (/pximg\.net/.test(src) && !/\/img-original\//.test(src)) {
+        const base = src
+          .replace(/\/c\/[^/]+\//, "/")
+          .replace(/\/(?:img-master|custom-thumb)\//, "/img-original/")
+          .replace(/_(?:master|custom|square)1200/, "");
+        downloadUrls = [
+          base.replace(/\.(?:jpe?g|png)$/i, ".png"),
+          base.replace(/\.(?:jpe?g|png)$/i, ".jpg"),
+        ];
+      }
+
+      return {
+        poster,
+        handle: "",
+        artists: [],
+        tags,
+        caption,
+        alt: readAlt(img),
+        imageIndex,
+        imageCount,
+        downloadUrls,
+        fallbackBase: artId ? `${artId}_p${page}` : basenameFromUrl(src),
+        ext: extFromUrl(src),
+      };
+    },
+  };
+
   // ---- GENERIC (only reached if matched-site selectors above miss) ----------
   const GENERIC_EXTRACTOR = {
     id: "generic",
@@ -419,7 +522,7 @@
     },
   };
 
-  window.SIS_EXTRACTORS = [X_EXTRACTOR, BLUESKY_EXTRACTOR, MASTODON_EXTRACTOR, GENERIC_EXTRACTOR];
+  window.SIS_EXTRACTORS = [X_EXTRACTOR, BLUESKY_EXTRACTOR, MASTODON_EXTRACTOR, PIXIV_EXTRACTOR, GENERIC_EXTRACTOR];
 })();
 
 /* =============================================================================
@@ -447,6 +550,21 @@
 
   const pickExtractor = () =>
     (window.SIS_EXTRACTORS || []).find((x) => x.test(location)) || null;
+
+  // Rendition-tolerant filename key: strips the extension marker forms that
+  // differ between copies of the same file (Bluesky's @ext, pixiv's
+  // _master1200 family) so two renditions compare equal.
+  function basename(u) {
+    try {
+      return new URL(u, location.href).pathname
+        .split("/")
+        .pop()
+        .split("@")[0]
+        .replace(/_(?:master|custom|square)1200/, "");
+    } catch (_) {
+      return "";
+    }
+  }
 
   function resolveImage(srcUrl, byUrlOnly) {
     // byUrlOnly is set for cross-tab recovery queries: this tab was not the
@@ -578,7 +696,7 @@
         return true;
       }
       const data = extractor.extract(img);
-      sendResponse({ ok: true, base: baseName(data), urlExt: data.ext, downloadUrl: data.downloadUrl || "" });
+      sendResponse({ ok: true, base: baseName(data), urlExt: data.ext, downloadUrl: data.downloadUrl || "", downloadUrls: data.downloadUrls || [] });
     } catch (err) {
       sendResponse({ ok: false, reason: String(err && err.message) });
     }

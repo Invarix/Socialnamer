@@ -1,79 +1,52 @@
-[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
-
 # Socialnamer (Chromium, MV3)
 
-Right-click an image on X/Twitter, Bluesky, Pixiv, or a supported Mastodon instance →
-**Download with Socialnamer**. It opens a save dialog with an editable
-filename field, pre-filled from the post - poster, handle, artist credit,
-tags, caption keywords - and can convert the file out of webp on the way
-down. No more `HiJKlMNoP.jpg`.
+Right-click an image on X/Twitter, Bluesky, Pixiv, or a supported Mastodon instance → **Download with Socialnamer**.
+It opens a save dialog with an editable filename field, pre-filled with the
+poster, handle, any artist credit, and tags from the post - and can convert the
+file out of webp on the way down.
 
 ## Filename
 
-All parts are joined by underscores into a flat filename:
-`poster_handle_artist_tags_keywords`.
+All parts are joined by underscores into a flat, ASCII filename:
+`poster_handle_artist_tag`.
 
 1. Poster name, then handle, then any artist shout-out from the caption
    (`art by @x`, `src: @y`, @mentions), then hashtags.
-2. Up to four keywords from the post text itself - a caption of "white rabbit"
-   becomes `white_rabbit` in the filename. Links, @mentions, #tags (captured
-   separately), and filler words are skipped.
-3. If the poster wrote an image description (alt text), up to four keywords
-   from it are appended too. Placeholder values like X's `alt="Image"` are
-   ignored, and words already present aren't repeated. (This is the
-   description written on the post - social sites strip EXIF metadata on
-   upload, so there's nothing usable inside the image file itself.)
-4. Multi-image posts get a position suffix in display order - the first of
+2. Accented letters are kept (`Māui`, `José`, `Müller`). `@` and `#` are
+   dropped, and any character that's illegal on Windows or Linux
+   (`\ / : * ? " < > |`, control chars, etc.) becomes an underscore - so the
+   name is always safe to write to disk.
+3. On Bluesky the `.bsky.social` suffix is trimmed, and a handle that just
+   repeats the display name is dropped (so `alice` + `alice.bsky.social` →
+   `alice`, not `alice_alice_bsky_social`).
+4. Up to four meaningful keywords from the post text itself (stopwords,
+   mentions, and links excluded) - a caption like "Character doodle #fanart" yields
+   `fanart_Character_doodle`.
+5. If the poster wrote an image description (alt text), up to four keywords
+   from it are appended - e.g. "A white rabbit sitting in grass" adds
+   `white_rabbit_sitting_grass`. Placeholder values like X's `alt="Image"` are
+   ignored, and words already present as tags aren't repeated. (Note: this is
+   the description written on the post - social sites strip EXIF metadata from
+   uploads, so there's nothing usable inside the image file itself.)
+6. Multi-image posts get a position suffix in display order - the first of
    four saves as `…01.jpg`, the fourth as `…04.jpg`. Single-image posts have
    no suffix.
-5. Nothing found → falls back to the site's random string (e.g. the media id),
-   so you never get a worse name than the default.
+7. Nothing found → falls back to the site's random string (e.g. the media id).
 
-Character safety: accented and non-Latin letters are kept (`Māui`, `José`,
-`日本語`). `@` and `#` are dropped, and anything illegal on Windows or Linux
-(`\ / : * ? " < > |`, control chars, emoji, other symbols) becomes an
-underscore, so the name is always safe to write to disk. Windows reserved
-device names (`CON`, `PRN`, …) are guarded. On Bluesky the `.bsky.social`
-suffix is trimmed and a handle that just repeats the display name is dropped
-(`alice` + `alice.bsky.social` → `alice`, not `alice_alice_bsky_social`).
+Saving from a direct media URL (an image opened in its own tab) still works:
+if the tab you came from is open, the extension finds the post there by the
+file's rendition-stable name. Without such a tab, Bluesky posts are recovered
+via the public AppView API and Pixiv artworks via pixiv's public artwork
+endpoint; other sites fall back to the file hash.
 
 Example: a post by *Māui Person* (@MauiPerson) →
 `Māui_Person_MauiPerson.jpg`. The field stays editable, so you can add
 keywords before saving.
 
-Note: the extension reads the text as rendered - if X has auto-translated the
-post, the translated caption is what lands in the filename. Tap "show
-original" first to keep the source language.
-
-## Where it works
-
-- **Feed / timeline** - right-click any post image.
-- **Post pages and the image lightbox** - X's `/photo/N` viewer, Bluesky's
-  expanded-image view, and Mastodon's media modal are all supported (the post
-  is located via the URL, the item's testid, or the media file's identity as
-  needed).
-- **Mastodon instances** - one generic extractor covers the Mastodon web UI:
-  author, caption, tags, alt text, and multi-image numbering all work the same
-  as on X and Bluesky. Bonus: gallery thumbnails are the small rendition, so
-  the extension automatically downloads the full-size original instead of the
-  thumb you clicked. The supported instance list lives in the manifest.
-- **Direct media URLs** (an image opened in its own tab from any supported
-  site) - the menu still appears, and if the tab you came from is still open,
-  the extension finds the post there by the file's rendition-stable name and
-  builds the full smart filename. Without such a tab: Bluesky posts are
-  recovered through the platform's public AppView API (author, text, tags,
-  alt), Pixiv artworks through pixiv's public artwork endpoint (artist,
-  title, tags), and other sites fall back to the file hash, since their bare
-  media URLs carry no recoverable info.
-- **Pixiv** - artwork pages, manga galleries (page numbering maps to the
-  `_pN` index), and collection grids. Saves upgrade to the full
-  `img-original` file when it exists, trying png then jpg, and the required
-  Referer header is handled automatically so downloads and conversions work.
-
 ## Format conversion (the webp fix)
 
-The submenu gives three choices - picked **before** the save dialog, because
-an extension can't add controls inside the OS Save As window:
+The submenu gives four choices - picked **before** the save dialog, because an
+extension can't add controls inside the OS Save As window:
 
 | Item | Behavior |
 |------|----------|
@@ -84,49 +57,40 @@ an extension can't add controls inside the OS Save As window:
 To pull a Bluesky webp down as a PNG, pick **Force PNG** - the byte-sniffing
 below means it converts even when the URL claims the file is a jpeg.
 
-Format is detected by **sniffing the file's magic bytes**, not the URL -
-Bluesky serves webp under a `…@jpeg` URL via content negotiation, so the
-extension would lie. Conversion uses `OffscreenCanvas` in the background.
-Re-encoding a webp recovers the pixels, not the photographer's original file -
-there's no original hiding behind the webp to get back to.
+Format is detected by **sniffing the file's magic bytes**, not the URL - Bluesky
+serves webp under a `…@jpeg` URL via content negotiation, so the extension would
+lie. Conversion uses `OffscreenCanvas` in the background (same approach as
+"Save Image as Any Type"). Re-encoding a webp recovers the pixels, not the
+photographer's original file - there's no original hiding behind the webp to get
+back to.
 
-> Converted files are handed to the download as a blob URL where the
-> background supports it, with a base64 data URL as the fallback (Chrome's
-> service worker can't mint blob URLs). Normal social images are fine either
-> way; if an unusually large PNG re-encode ever fails, use **Keep original**.
+> Converted files are handed to the download as a base64 data URL (service
+> workers can't mint blob URLs). That's fine for normal social images; a very
+> large PNG re-encode could bump a size ceiling, in which case use **Keep
+> original** or switch the convert path to the `chrome.offscreen` API.
 
 ## Install & permissions
 
-From the Chrome Web Store, or unpacked: `chrome://extensions` →
-**Developer mode** → **Load unpacked** → pick this folder. A Firefox build
-ships from the same source with only the manifest differing.
+`chrome://extensions` → **Developer mode** → **Load unpacked** → pick this folder.
 
-Host permissions cover the page sites (including the supported Mastodon
-instances), the image CDNs (`*.twimg.com`, `*.bsky.app`, and the instances'
-media hosts - reading the bytes is what enables conversion and format
-sniffing), and the platforms' public read-only endpoints for direct media URLs (Bluesky AppView, pixiv artwork lookup; requests identify the artwork or author, never you). No analytics, no remote code, nothing leaves your
-machine otherwise.
+Host permissions cover the page sites **and** the image CDNs
+(`*.twimg.com`, `*.bsky.app`) - the CDN access is what lets the background read
+the bytes to convert them. Without it, conversion silently falls back to saving
+the original.
 
 ## Maintenance
 
-Site scraping lives in the extractor section at the top of `content.js`
-(`User-Name`/`tweetText` for X, `feedItem-by-`/`postThreadItem-by-` testids
-and `postText` for Bluesky, and a generic Mastodon extractor keyed off
-`.status` / `.display-name__account` / `.status__content`) - that's the place
-to patch when a site reshuffles its DOM.
-
-To add a Mastodon instance: add its domain to `MASTODON_INSTANCES`
-(content.js), `matches` (manifest.json), and `SITE_PATTERNS` (background.js)
-plus `host_permissions` for its media host. To add a non-Mastodon site: insert
-an extractor before `GENERIC_EXTRACTOR` and register the same three places.
+Site scraping lives in the extractor section at the top of `content.js` (`User-Name`/`tweetText` for X,
+`a[href^="/profile/"]`/`postText` for Bluesky) - the file to patch when a site
+reshuffles its DOM. To add a site, add an extractor before `GENERIC_EXTRACTOR`
+and add the URL to `matches` (manifest) + `SITE_PATTERNS` (background.js); add
+its CDN to `host_permissions` if conversion is needed there.
 
 ## Files
 
 ```
 manifest.json          MV3; permissions: contextMenus + downloads (+ CDN hosts)
-background.js          menu, format sniffing, conversion, DID lookup, save
+background.js          submenu, format sniffing, conversion, save
 content.js             per-site extractors (top of file) + filename assembly
-icon16/32/48/128.png   toolbar + store icons
+icon16/32/48/128.png   toolbar + management icons (referenced by the manifest)
 ```
-
-[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)

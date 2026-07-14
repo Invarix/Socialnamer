@@ -35,10 +35,12 @@ const SITE_PATTERNS = [
   "https://*.pawoo.net/*",
   "https://baraag.net/*",
   "https://*.baraag.net/*",
+  "https://www.pixiv.net/*",
   // Direct image URLs (opened in their own tab) - no post DOM here, but the
   // menu should still work; the background derives what it can from the URL.
   "https://cdn.bsky.app/*",
   "https://pbs.twimg.com/*",
+  "https://i.pximg.net/*",
 ];
 
 // ---- menu ------------------------------------------------------------------
@@ -68,6 +70,36 @@ function buildMenu() {
 ext.runtime.onInstalled.addListener(buildMenu);
 ext.runtime.onStartup && ext.runtime.onStartup.addListener(buildMenu);
 
+// pximg refuses requests without a pixiv Referer. Downloads set the header
+// directly; the background's own sniff and convert fetches cannot, so a
+// declarativeNetRequest session rule injects it for that host only.
+function installPximgRefererRule() {
+  if (!ext.declarativeNetRequest || !ext.declarativeNetRequest.updateSessionRules) return;
+  ext.declarativeNetRequest
+    .updateSessionRules({
+      removeRuleIds: [1],
+      addRules: [
+        {
+          id: 1,
+          priority: 1,
+          condition: {
+            requestDomains: ["i.pximg.net"],
+            resourceTypes: ["xmlhttprequest", "image", "other"],
+          },
+          action: {
+            type: "modifyHeaders",
+            requestHeaders: [
+              { header: "Referer", operation: "set", value: "https://www.pixiv.net/" },
+            ],
+          },
+        },
+      ],
+    })
+    .catch(() => {});
+}
+ext.runtime.onInstalled.addListener(installPximgRefererRule);
+ext.runtime.onStartup && ext.runtime.onStartup.addListener(installPximgRefererRule);
+
 // ---- click -----------------------------------------------------------------
 
 ext.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -79,6 +111,7 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
   let base = "image";
   let urlExt = "jpg";
   let gotSmart = false;
+  let downloadCandidates = [];
   try {
     const resp = await ext.tabs.sendMessage(
       tab.id,
@@ -91,6 +124,7 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
       // Extractor may know a better rendition of the same file, e.g.
       // Mastodon's /original/ next to the /small/ thumb that was clicked.
       if (resp.downloadUrl) srcUrl = resp.downloadUrl;
+      if (resp.downloadUrls && resp.downloadUrls.length) downloadCandidates = resp.downloadUrls;
       gotSmart = true;
     }
   } catch (_) {
@@ -112,6 +146,17 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   }
 
+  // Direct pximg URLs: the artwork id in the path keys pixiv's public JSON
+  // endpoint, which returns artist, title, and tags. Used only when nothing
+  // else produced a name.
+  if (!gotSmart) {
+    const px = await resolvePixivArtwork(srcUrl);
+    if (px) {
+      base = px;
+      gotSmart = true;
+    }
+  }
+
   // Direct cdn.bsky.app URLs (image opened in its own tab): no post DOM, but
   // the URL carries the author DID and blob CID. Find the post via the public
   // AppView API to recover author, text, tags, and alt; fall back to just the
@@ -127,14 +172,22 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   }
 
-  // Fetch the bytes once so we can sniff the REAL format (and convert if asked).
+  // Fetch the bytes once so we can sniff the REAL format (and convert if
+  // asked). Candidates from the extractor are better renditions of the same
+  // file (e.g. pixiv originals with unknown extension); first success wins.
   let blob = null;
   let served = urlExt;
-  try {
-    blob = await (await fetch(srcUrl)).blob();
-    served = (await sniffFormat(blob)) || extFromUrl(srcUrl) || urlExt;
-  } catch (_) {
-    /* couldn't read bytes (no CDN permission / network) - fall back below */
+  for (const cand of [...downloadCandidates, srcUrl]) {
+    try {
+      const r = await fetch(cand, { credentials: "include" });
+      if (!r.ok) continue;
+      blob = await r.blob();
+      srcUrl = cand;
+      served = (await sniffFormat(blob)) || extFromUrl(cand) || urlExt;
+      break;
+    } catch (_) {
+      /* try the next candidate; total failure falls back below */
+    }
   }
 
   // Decide target format from the chosen menu item.
@@ -154,11 +207,11 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
       await saveConverted(blob, target, `${base}.${target}`, srcUrl);
     } else {
       // No conversion: keep the original bytes; name with the real format.
-      await ext.downloads.download({
-        url: srcUrl,
-        filename: `${base}.${served}`,
-        saveAs: true,
-      });
+      const opts = { url: srcUrl, filename: `${base}.${served}`, saveAs: true };
+      if (/pximg\.net/.test(srcUrl)) {
+        opts.headers = [{ name: "Referer", value: "https://www.pixiv.net/" }];
+      }
+      await ext.downloads.download(opts);
     }
   } catch (err) {
     console.error("[Socialnamer] save failed:", err);
@@ -219,6 +272,7 @@ async function findInOpenTabs(srcUrl) {
     "https://bsky.app/*",
     "https://pawoo.net/*",
     "https://baraag.net/*",
+    "https://www.pixiv.net/*",
   ];
   let tabs = [];
   try {
@@ -239,6 +293,37 @@ async function findInOpenTabs(srcUrl) {
     }
   }
   return null;
+}
+
+// -- pixiv public artwork endpoint (read-only) --
+// From a direct pximg URL, recover artist, title, and tags via the artwork
+// id in the path. The request carries no user data beyond browser cookies
+// for pixiv itself, which the user's own page visits already send.
+async function resolvePixivArtwork(srcUrl) {
+  const m = String(srcUrl).match(/pximg\.net\/.*\/(\d+)_p(\d+)/);
+  if (!m) return null;
+  const [, artId, page] = m;
+  try {
+    const r = await fetch(`https://www.pixiv.net/ajax/illust/${artId}`, {
+      credentials: "include",
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const b = j && j.body;
+    if (!b) return null;
+    const tags =
+      b.tags && Array.isArray(b.tags.tags)
+        ? b.tags.tags.slice(0, 6).map((x) => x.tag)
+        : [];
+    const parts = [b.userName, b.title, ...tags].map(bgToken).filter(Boolean);
+    if (!parts.length) return null;
+    let out = parts.join("_").replace(/_+/g, "_").slice(0, 180);
+    const count = Number(b.pageCount || 0);
+    if (count > 1) out += String(Number(page) + 1).padStart(2, "0");
+    return out;
+  } catch (_) {
+    return null;
+  }
 }
 
 // -- Bluesky public AppView API (unauthenticated, read-only) --
