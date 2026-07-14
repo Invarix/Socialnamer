@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "Socialnamer",
+  "version": "0.3.0",
+  "description": "Save images from X, Bluesky, Mastodon, and Pixiv with a smart filename: artist, title, handle, tags. Convert WebP to PNG or JPG.",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "Download with Socialnamer",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "permissions": [
+    "contextMenus",
+    "downloads",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://bsky.app/*",
+    "https://*.twimg.com/*",
+    "https://*.bsky.app/*",
+    "https://pawoo.net/*",
+    "https://*.pawoo.net/*",
+    "https://baraag.net/*",
+    "https://*.baraag.net/*",
+    "https://www.pixiv.net/*",
+    "https://i.pximg.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://bsky.app/*",
+        "https://pawoo.net/*",
+        "https://baraag.net/*",
+        "https://www.pixiv.net/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
