@@ -1,5 +1,6 @@
 # Socialnamer (Chromium, MV3)
 
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
 Right-click an image on X/Twitter, Bluesky, Pixiv, a supported Mastodon instance, or an online gallery → **Download with Socialnamer**.
 It opens a save dialog with an editable filename field, pre-filled with the
 poster, handle, any artist credit, and tags from the post - and can convert the
@@ -94,3 +95,4 @@ background.js          submenu, format sniffing, conversion, save
 content.js             per-site extractors (top of file) + filename assembly
 icon16/32/48/128.png   toolbar + management icons (referenced by the manifest)
 ```
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/invarix)
