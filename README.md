@@ -2,7 +2,7 @@
 
 # Socialnamer (Chromium, MV3)
 
-Right-click an image on X/Twitter, Bluesky, Pixiv, or a supported Mastodon instance →
+Right-click an image on X/Twitter, Bluesky, Pixiv, a supported Mastodon instance, or an online gallery →
 **Download with Socialnamer**. It opens a save dialog with an editable
 filename field, pre-filled from the post - poster, handle, artist credit,
 tags, caption keywords - and can convert the file out of webp on the way
@@ -69,6 +69,11 @@ original" first to keep the source language.
   `_pN` index), and collection grids. Saves upgrade to the full
   `img-original` file when it exists, trying png then jpg, and the required
   Referer header is handled automatically so downloads and conversions work.
+- **Online galleries** - tag-categorized image boards. Filenames are built
+  from the descriptive tag categories (artist, copyright, character, species)
+  in that order; the large alphabetical "general" bucket and housekeeping tags
+  are omitted. Tags are read from the post's own public metadata endpoint, and
+  the full-resolution file is downloaded. Supported sites live in the manifest.
 
 ## Format conversion (the webp fix)
 

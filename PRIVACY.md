@@ -66,6 +66,7 @@ requests of any kind.
 | `downloads` | To open the save dialog pre-filled with the generated filename. |
 | Host access: `x.com`, `twitter.com`, `bsky.app`, supported Mastodon instances | To read the post content (author, caption, tags, alt text) on the page you invoked the extension on, so the filename can be built. |
 | Host access: `*.twimg.com`, `*.bsky.app` | To fetch the image bytes for format detection and optional JPG/PNG conversion. |
+| Host access: online gallery sites | Reads the post's public metadata endpoint for tag categories; fetches image bytes for saving and conversion. |
 | Host access: `www.pixiv.net`, `i.pximg.net` | Reads the artwork page for the filename; fetches image bytes for saving and conversion (with the Referer header the site requires); read-only artwork lookup for direct image URLs (see above). |
 
 The extension reads pages only on the sites listed above, and only in service
