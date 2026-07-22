@@ -36,11 +36,13 @@ const SITE_PATTERNS = [
   "https://baraag.net/*",
   "https://*.baraag.net/*",
   "https://www.pixiv.net/*",
+  "https://e621.net/*",
   // Direct image URLs (opened in their own tab) - no post DOM here, but the
   // menu should still work; the background derives what it can from the URL.
   "https://cdn.bsky.app/*",
   "https://pbs.twimg.com/*",
   "https://i.pximg.net/*",
+  "https://*.e621.net/*",
 ];
 
 // ---- menu ------------------------------------------------------------------
@@ -175,15 +177,21 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
   // Fetch the bytes once so we can sniff the REAL format (and convert if
   // asked). Candidates from the extractor are better renditions of the same
   // file (e.g. pixiv originals with unknown extension); first success wins.
+  // A response is only accepted if its bytes sniff as a real image - this
+  // rejects HTML error pages some hosts return with a 200 status, which would
+  // otherwise be saved as an .htm file.
   let blob = null;
   let served = urlExt;
   for (const cand of [...downloadCandidates, srcUrl]) {
     try {
       const r = await fetch(cand, { credentials: "include" });
       if (!r.ok) continue;
-      blob = await r.blob();
+      const b = await r.blob();
+      const s = await sniffFormat(b);
+      if (!s) continue; // not an image (e.g. an HTML error page) - skip
+      blob = b;
+      served = s;
       srcUrl = cand;
-      served = (await sniffFormat(blob)) || extFromUrl(cand) || urlExt;
       break;
     } catch (_) {
       /* try the next candidate; total failure falls back below */
@@ -205,8 +213,15 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
     if (canConvert && wantConvert) {
       await saveConverted(blob, target, `${base}.${target}`, srcUrl);
+    } else if (blob) {
+      // Save the exact image bytes we already fetched and verified. This
+      // guarantees an image with the sniffed extension and never re-requests
+      // a URL that might resolve to HTML (the cause of stray .htm saves).
+      await saveBlob(blob, `${base}.${served}`, srcUrl);
     } else {
-      // No conversion: keep the original bytes; name with the real format.
+      // Nothing could be read/verified (e.g. the fetch was blocked). Fall
+      // back to downloading the URL directly, forcing the Referer that the
+      // pixiv image host requires.
       const opts = { url: srcUrl, filename: `${base}.${served}`, saveAs: true };
       if (/pximg\.net/.test(srcUrl)) {
         opts.headers = [{ name: "Referer", value: "https://www.pixiv.net/" }];
@@ -222,6 +237,32 @@ ext.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // ---- conversion ------------------------------------------------------------
+
+// Save already-fetched image bytes via a blob URL (Firefox event page) or a
+// data URL (Chrome service worker, which has no URL.createObjectURL). Falls
+// back to a direct URL download only if handing over the bytes fails.
+async function saveBlob(blob, filename, fallbackUrl) {
+  try {
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      const blobUrl = URL.createObjectURL(blob);
+      try {
+        await ext.downloads.download({ url: blobUrl, filename, saveAs: true });
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      }
+    } else {
+      const dataUrl = await blobToDataURL(blob);
+      await ext.downloads.download({ url: dataUrl, filename, saveAs: true });
+    }
+  } catch (err) {
+    console.error("[Socialnamer] blob save failed, using URL:", err);
+    const opts = { url: fallbackUrl, filename, saveAs: true };
+    if (/pximg\.net/.test(fallbackUrl)) {
+      opts.headers = [{ name: "Referer", value: "https://www.pixiv.net/" }];
+    }
+    await ext.downloads.download(opts);
+  }
+}
 
 async function saveConverted(blob, fmt, filename, srcFallbackUrl) {
   try {
@@ -273,6 +314,7 @@ async function findInOpenTabs(srcUrl) {
     "https://pawoo.net/*",
     "https://baraag.net/*",
     "https://www.pixiv.net/*",
+    "https://e621.net/*",
   ];
   let tabs = [];
   try {

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Socialnamer",
-  "version": "0.3.0",
-  "description": "Save images from X, Bluesky, Mastodon, and Pixiv with a smart filename: artist, title, handle, tags. Convert WebP to PNG or JPG.",
+  "version": "0.4.0",
+  "description": "Smart filenames for images saved from X, Bluesky, Mastodon, Pixiv, and online galleries. Converts WebP to PNG or JPG.",
   "icons": {
     "16": "icon16.png",
     "32": "icon32.png",
@@ -34,7 +34,9 @@
     "https://baraag.net/*",
     "https://*.baraag.net/*",
     "https://www.pixiv.net/*",
-    "https://i.pximg.net/*"
+    "https://i.pximg.net/*",
+    "https://e621.net/*",
+    "https://*.e621.net/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -47,7 +49,8 @@
         "https://bsky.app/*",
         "https://pawoo.net/*",
         "https://baraag.net/*",
-        "https://www.pixiv.net/*"
+        "https://www.pixiv.net/*",
+        "https://e621.net/*"
       ],
       "js": [
         "content.js"

@@ -495,6 +495,85 @@
     },
   };
 
+  // ---- GALLERIES (tag-categorized image boards) ------------------------------
+  // These sites expose a per-post JSON endpoint (/posts/<id>.json) whose tags
+  // are grouped by category. Filenames are built from the descriptive
+  // categories (artist, copyright, character, species) in that order; the
+  // "general" bucket is a large alphabetical dump and is omitted, as are meta
+  // and lore tags. To support another such site add its domain here, to
+  // `matches` (manifest), and to SITE_PATTERNS + host_permissions.
+  const GALLERY_INSTANCES = ["e621.net"];
+
+  const GALLERY_EXTRACTOR = {
+    id: "gallery",
+    test(loc) {
+      const h = loc.hostname;
+      return GALLERY_INSTANCES.some((d) => h === d || h.endsWith("." + d));
+    },
+    async extract(img) {
+      const src = img.currentSrc || img.src || "";
+      let fallbackBase = basenameFromUrl(src);
+      let ext = extFromUrl(src);
+
+      // Post id from the page URL, or the clicked thumbnail's enclosing link.
+      let postId = (location.pathname.match(/\/posts\/(\d+)/) || [])[1] || "";
+      if (!postId) {
+        const a =
+          (img.closest && img.closest('a[href*="/posts/"]')) ||
+          document.querySelector('a[href*="/posts/"]');
+        if (a)
+          postId =
+            (a.getAttribute("href").match(/\/posts\/(\d+)/) || [])[1] || "";
+      }
+
+      let tags = [];
+      let downloadUrl = "";
+      if (postId) {
+        try {
+          const r = await fetch(`${location.origin}/posts/${postId}.json`, {
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          });
+          if (r.ok) {
+            const j = await r.json();
+            const post = j.post || j;
+            const t = (post && post.tags) || {};
+            const take = (arr, n) =>
+              Array.isArray(arr) ? arr.slice(0, n) : [];
+            // Descriptive categories only, in filename order.
+            tags = [
+              ...take(t.artist, 3),
+              ...take(t.copyright, 2),
+              ...take(t.character, 3),
+              ...take(t.species, 3),
+            ].filter((x) => x && x !== "conditional_dnp");
+            if (post && post.file) {
+              if (post.file.url) downloadUrl = post.file.url;
+              if (post.file.ext) ext = post.file.ext;
+              if (post.file.md5) fallbackBase = post.file.md5;
+            }
+          }
+        } catch (_) {
+          /* API blocked or offline - fall back to the file hash below */
+        }
+      }
+
+      return {
+        poster: "",
+        handle: "",
+        artists: [],
+        tags, // ordered category tags become the filename
+        caption: "",
+        alt: "",
+        imageIndex: 0,
+        imageCount: 0,
+        downloadUrl,
+        fallbackBase,
+        ext,
+      };
+    },
+  };
+
   // ---- GENERIC (only reached if matched-site selectors above miss) ----------
   const GENERIC_EXTRACTOR = {
     id: "generic",
@@ -522,7 +601,7 @@
     },
   };
 
-  window.SIS_EXTRACTORS = [X_EXTRACTOR, BLUESKY_EXTRACTOR, MASTODON_EXTRACTOR, PIXIV_EXTRACTOR, GENERIC_EXTRACTOR];
+  window.SIS_EXTRACTORS = [X_EXTRACTOR, BLUESKY_EXTRACTOR, MASTODON_EXTRACTOR, PIXIV_EXTRACTOR, GALLERY_EXTRACTOR, GENERIC_EXTRACTOR];
 })();
 
 /* =============================================================================
@@ -688,18 +767,27 @@
 
   ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || msg.type !== "SIS_EXTRACT") return false;
-    try {
-      const img = resolveImage(msg.srcUrl, !!msg.byUrlOnly);
-      const extractor = pickExtractor();
-      if (!img || !extractor) {
-        sendResponse({ ok: false });
-        return true;
+    (async () => {
+      try {
+        const img = resolveImage(msg.srcUrl, !!msg.byUrlOnly);
+        const extractor = pickExtractor();
+        if (!img || !extractor) {
+          sendResponse({ ok: false });
+          return;
+        }
+        // extract may be async (some sources fetch a JSON metadata endpoint).
+        const data = await extractor.extract(img);
+        sendResponse({
+          ok: true,
+          base: baseName(data),
+          urlExt: data.ext,
+          downloadUrl: data.downloadUrl || "",
+          downloadUrls: data.downloadUrls || [],
+        });
+      } catch (err) {
+        sendResponse({ ok: false, reason: String(err && err.message) });
       }
-      const data = extractor.extract(img);
-      sendResponse({ ok: true, base: baseName(data), urlExt: data.ext, downloadUrl: data.downloadUrl || "", downloadUrls: data.downloadUrls || [] });
-    } catch (err) {
-      sendResponse({ ok: false, reason: String(err && err.message) });
-    }
-    return true;
+    })();
+    return true; // async response
   });
 })();
