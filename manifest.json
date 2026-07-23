@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Socialnamer",
-  "version": "0.4.0",
+  "version": "0.5.2",
   "description": "Smart filenames for images saved from X, Bluesky, Mastodon, Pixiv, and online galleries. Converts WebP to PNG or JPG.",
   "icons": {
     "16": "icon16.png",
@@ -21,7 +21,9 @@
   "permissions": [
     "contextMenus",
     "downloads",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://x.com/*",
@@ -58,5 +60,12 @@
       "run_at": "document_idle",
       "all_frames": true
     }
-  ]
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
 }

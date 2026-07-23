@@ -47,13 +47,24 @@ const SITE_PATTERNS = [
 
 // ---- menu ------------------------------------------------------------------
 
-function buildMenu() {
+async function buildMenu() {
+  // Named sites always work from SITE_PATTERNS. User-added sites are appended
+  // when present; any storage failure leaves the named behavior untouched.
+  let patterns = SITE_PATTERNS;
+  try {
+    const { userSites = [] } = await ext.storage.local.get({ userSites: [] });
+    if (userSites.length) {
+      patterns = SITE_PATTERNS.concat(userSites.map((d) => `https://${d}/*`));
+    }
+  } catch (_) {
+    /* storage unavailable - named sites still work */
+  }
   ext.contextMenus.removeAll(() => {
     ext.contextMenus.create({
       id: MENU.parent,
       title: "Download with Socialnamer",
       contexts: ["image"],
-      documentUrlPatterns: SITE_PATTERNS,
+      documentUrlPatterns: patterns,
     });
     const child = (id, title) =>
       ext.contextMenus.create({
@@ -61,7 +72,7 @@ function buildMenu() {
         parentId: MENU.parent,
         title,
         contexts: ["image"],
-        documentUrlPatterns: SITE_PATTERNS,
+        documentUrlPatterns: patterns,
       });
     child(MENU.keep, "Keep original format");
     child(MENU.jpg, "Force JPG");
@@ -69,8 +80,60 @@ function buildMenu() {
   });
 }
 
+// ---- user-added sites (optional, isolated from the named-site paths) --------
+// Named sites inject via the static content_scripts manifest entry and are
+// never touched here. This registers content.js only for domains the user
+// explicitly added and granted host access to, and re-runs on startup so the
+// registration persists. Wrapped so any failure degrades to "user sites don't
+// work this session" without affecting the named sites.
+async function syncUserSiteScripts() {
+  if (!ext.scripting || !ext.scripting.registerContentScripts) return;
+  try {
+    try {
+      await ext.scripting.unregisterContentScripts({ ids: ["sis-user-sites"] });
+    } catch (_) {
+      /* nothing registered yet */
+    }
+    const { userSites = [] } = await ext.storage.local.get({ userSites: [] });
+    const granted = [];
+    for (const d of userSites) {
+      const pat = `https://${d}/*`;
+      try {
+        if (await ext.permissions.contains({ origins: [pat] })) granted.push(pat);
+      } catch (_) {
+        /* skip this one */
+      }
+    }
+    if (granted.length) {
+      await ext.scripting.registerContentScripts([
+        {
+          id: "sis-user-sites",
+          matches: granted,
+          js: ["content.js"],
+          runAt: "document_idle",
+          allFrames: true,
+        },
+      ]);
+    }
+  } catch (err) {
+    console.error("[Socialnamer] user-site script sync failed:", err);
+  }
+}
+
+// The options page updates storage/permissions, then pings the background to
+// re-register scripts and rebuild the menu.
+ext.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === "SIS_SITES_CHANGED") {
+    syncUserSiteScripts();
+    buildMenu();
+  }
+  return false;
+});
+
 ext.runtime.onInstalled.addListener(buildMenu);
 ext.runtime.onStartup && ext.runtime.onStartup.addListener(buildMenu);
+ext.runtime.onInstalled.addListener(syncUserSiteScripts);
+ext.runtime.onStartup && ext.runtime.onStartup.addListener(syncUserSiteScripts);
 
 // pximg refuses requests without a pixiv Referer. Downloads set the header
 // directly; the background's own sniff and convert fetches cannot, so a
@@ -353,11 +416,12 @@ async function resolvePixivArtwork(srcUrl) {
     const j = await r.json();
     const b = j && j.body;
     if (!b) return null;
-    const tags =
-      b.tags && Array.isArray(b.tags.tags)
-        ? b.tags.tags.slice(0, 6).map((x) => x.tag)
-        : [];
-    const parts = [b.userName, b.title, ...tags].map(bgToken).filter(Boolean);
+    // Artist, title, and the first line of the description only - matching the
+    // on-page naming. The large tag list is intentionally left out.
+    const descLine = bgFirstLine(b.description || b.illustComment || "");
+    const parts = [b.userName, b.title || b.illustTitle, descLine]
+      .map(bgToken)
+      .filter(Boolean);
     if (!parts.length) return null;
     let out = parts.join("_").replace(/_+/g, "_").slice(0, 180);
     const count = Number(b.pageCount || 0);
@@ -366,6 +430,26 @@ async function resolvePixivArtwork(srcUrl) {
   } catch (_) {
     return null;
   }
+}
+
+// Description first line (background copy of the content-script helper): honor
+// line breaks, strip markup/entities, stop at the first link.
+function bgFirstLine(html) {
+  if (!html) return "";
+  const text = String(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, " ");
+  const line = text.split("\n").map((s) => s.trim()).find(Boolean) || "";
+  let out = line.split(/https?:\/\//)[0];
+  out = out.replace(/[#\uFF03]\S+/g, "").replace(/@\S+/g, "");
+  return out.trim().slice(0, 60);
 }
 
 // -- Bluesky public AppView API (unauthenticated, read-only) --

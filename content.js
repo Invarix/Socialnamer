@@ -15,6 +15,24 @@
   "use strict";
 
   const MENTION_RE = /@([A-Za-z0-9_]{1,30})/g;
+
+  // User-added gallery domains (from the options page). Cached here so the
+  // gallery extractor's test() stays synchronous; refreshed on change. Empty
+  // and inert unless the user has added sites, so named sites are unaffected.
+  let galleryUserSites = [];
+  try {
+    const _api = globalThis.browser ?? globalThis.chrome;
+    _api.storage.local.get({ userSites: [] }, (r) => {
+      galleryUserSites = (r && r.userSites) || [];
+    });
+    _api.storage.onChanged.addListener((c, area) => {
+      if (area === "local" && c.userSites) {
+        galleryUserSites = c.userSites.newValue || [];
+      }
+    });
+  } catch (_) {
+    /* storage unavailable - user sites simply won't match */
+  }
   const HASHTAG_RE = /#([\p{L}\p{N}_]{1,40})/gu;
   const CREDIT_HINT_RE =
     /\b(art(?:work)?\s*(?:by|:)|by|cr(?:edit)?s?\s*:?|source|src|via|drawn by|illust(?:ration)?\s*(?:by|:)|🎨|✒️|🖌️)\b/i;
@@ -63,6 +81,27 @@
         return ext === "jpeg" ? "jpg" : ext;
     } catch (_) {}
     return "jpg";
+  }
+
+  // Reduce an HTML description to a short, clean first line: honor the
+  // author's line breaks, strip markup and entities, and stop at the first
+  // link so trailing URLs, mentions, and hashtags don't leak into the name.
+  function firstLine(html) {
+    if (!html) return "";
+    const text = String(html)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|div|li)>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#0*39;|&apos;/g, "'")
+      .replace(/&nbsp;/g, " ");
+    const line = text.split("\n").map((s) => s.trim()).find(Boolean) || "";
+    let out = line.split(/https?:\/\//)[0];
+    out = out.replace(/[#\uFF03]\S+/g, "").replace(/@\S+/g, "");
+    return out.trim().slice(0, 60);
   }
 
   function basenameFromUrl(url) {
@@ -403,70 +442,59 @@
       const h = loc.hostname;
       return h === "www.pixiv.net" || h === "pixiv.net" || h.endsWith(".pixiv.net");
     },
-    extract(img) {
+    async extract(img) {
       const src = img.currentSrc || img.src || "";
 
-      // Artwork id and zero-based page index from the media URL.
+      // Artwork id and zero-based page index from the media URL. This works
+      // on both the artwork page and grid thumbnails, so it is the reliable
+      // key regardless of which /users/ links happen to be on the page.
       const pm = src.match(
         /\/img\/\d{4}\/\d{2}\/\d{2}\/\d{2}\/\d{2}\/\d{2}\/(\d+)_p(\d+)/
       );
-      const artId = pm ? pm[1] : (location.pathname.match(/^\/(?:en\/)?artworks\/(\d+)/) || [])[1] || "";
+      let artId = pm ? pm[1] : "";
       const page = pm ? parseInt(pm[2], 10) : 0;
+      if (!artId) {
+        artId =
+          (location.pathname.match(/^\/(?:en\/)?artworks\/(\d+)/) || [])[1] ||
+          "";
+        if (!artId) {
+          const a = img.closest && img.closest('a[href*="/artworks/"]');
+          if (a)
+            artId =
+              (a.getAttribute("href").match(/\/artworks\/(\d+)/) || [])[1] ||
+              "";
+        }
+      }
 
-      // Author: profile links use /users/<id>. Prefer one with visible text.
+      // Author, title, and description come from the post's own JSON endpoint,
+      // not the DOM. This fixes grabbing the viewer's own profile name on grid
+      // pages and lets us take only the title and description (not every tag).
       let poster = "";
-      const scope =
-        img.closest("figure") ||
-        img.closest("main") ||
-        document;
-      const pools = [scope, document];
-      for (const pool of pools) {
-        for (const a of pool.querySelectorAll('a[href*="/users/"]')) {
-          const t = (a.textContent || "").trim();
-          if (t && !/^\d+$/.test(t)) {
-            poster = t;
-            break;
-          }
-        }
-        if (poster) break;
-      }
-
-      // Title and description: h1 on artwork pages; figcaption holds the
-      // description block. Both feed the caption keyword budget.
-      const h1 = document.querySelector("h1");
-      const figcap = document.querySelector("figcaption");
-      const caption = [
-        h1 ? h1.textContent.trim() : "",
-        figcap ? figcap.textContent.trim() : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-
-      // Tags: pixiv renders them as /tags/ links. Dedupe, keep order.
-      const tags = uniq(
-        [...document.querySelectorAll('a[href*="/tags/"]')]
-          .map((a) => (a.textContent || "").trim())
-          .filter((t) => t && t.length <= 40 && !t.includes("#"))
-      ).slice(0, 8);
-
-      // Multi-image galleries: count distinct page indexes for this artwork
-      // among images on the page. The page index itself proves multi when
-      // it is above zero even if the count is unknowable.
-      let imageCount = 0;
+      let title = "";
+      let descLine = "";
+      let pageCount = 0;
       if (artId) {
-        const pages = new Set();
-        for (const el of document.images) {
-          const m = (el.src || "").match(
-            new RegExp("/" + artId + "_p(\\d+)")
-          );
-          if (m) pages.add(m[1]);
+        try {
+          const r = await fetch(`${location.origin}/ajax/illust/${artId}`, {
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          });
+          if (r.ok) {
+            const j = await r.json();
+            const b = j && j.body;
+            if (b) {
+              poster = b.userName || "";
+              title = b.title || b.illustTitle || "";
+              pageCount = Number(b.pageCount || 0);
+              descLine = firstLine(b.description || b.illustComment || "");
+            }
+          }
+        } catch (_) {
+          /* endpoint unavailable - falls back to the id-based name below */
         }
-        imageCount = pages.size;
       }
-      if (!imageCount && page > 0) imageCount = page + 1;
-      const imageIndex = pm ? page + 1 : 0;
 
-      // Original-rendition candidates (png first, jpg second).
+      // Rendition candidates: the full-resolution original (png then jpg).
       let downloadUrls = [];
       if (/pximg\.net/.test(src) && !/\/img-original\//.test(src)) {
         const base = src
@@ -479,13 +507,19 @@
         ];
       }
 
+      const imageIndex = pm ? page + 1 : 0;
+      const imageCount = pageCount > 1 ? pageCount : page > 0 ? page + 1 : 0;
+
       return {
-        poster,
+        poster, // real artist from the API
         handle: "",
         artists: [],
-        tags,
-        caption,
-        alt: readAlt(img),
+        // Title and first description line only. Kept as tag entries so each
+        // stays intact (multi-word titles aren't truncated to a word budget),
+        // and the large tag list is intentionally omitted.
+        tags: [title, descLine].filter(Boolean),
+        caption: "",
+        alt: "",
         imageIndex,
         imageCount,
         downloadUrls,
@@ -508,7 +542,11 @@
     id: "gallery",
     test(loc) {
       const h = loc.hostname;
-      return GALLERY_INSTANCES.some((d) => h === d || h.endsWith("." + d));
+      if (GALLERY_INSTANCES.some((d) => h === d || h.endsWith("." + d)))
+        return true;
+      // User-added sites route through the gallery extractor too: it tries the
+      // booru JSON endpoint and otherwise falls back to filename cleaning.
+      return galleryUserSites.some((d) => h === d || h.endsWith("." + d));
     },
     async extract(img) {
       const src = img.currentSrc || img.src || "";
